@@ -1,0 +1,71 @@
+{
+  "name": "@argszero/cordis-plugin-content-exists-risk",
+  "description": "Content-moderation rescue for dsh: a provider's content moderation (DeepSeek HTTP 400 'Content Exists Risk' / INVALID_REQUEST) rejects an entire request, and because the loop re-derives the whole conversation from the session log on every turn, one stored record that trips it makes every later turn of that session fail - even a two-character new message (discussions #7181, #6495, #6476). Mounted on the public llm/stream waterfall, this plugin inserts a space between every pair of adjacent non-space characters in the newest messages, escalating from a small rung to the whole request only as far as the provider's own rejection proves necessary, and re-dispatches as a new object. A request that is never rejected is dispatched untouched: no tokens, no cache invalidation, no rewrite. Compatible with the dsh 0.1.2, 0.1.3, 0.1.5 and 0.1.6 prerelease lines.",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/types/**/*.d.ts",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/argszero/cordis-plugin-content-exists-risk.git"
+  },
+  "homepage": "https://github.com/argszero/cordis-plugin-content-exists-risk#readme",
+  "bugs": {
+    "url": "https://github.com/argszero/cordis-plugin-content-exists-risk/issues"
+  },
+  "keywords": [
+    "cordis",
+    "deepseek-harness",
+    "dsh",
+    "plugin",
+    "llm",
+    "content-moderation",
+    "content-exists-risk",
+    "invalid-request",
+    "unrecoverable-session",
+    "llm-stream"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-llm": ">=0.1.2-rc.1 <0.2.0 || >=0.1.3-alpha.2 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-alpha.1 <0.2.0"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-llm": "0.1.6-alpha.2",
+    "typescript": "^5.5.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc && node --test \"test/*.spec.mjs\"",
+    "prepublishOnly": "tsc"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-llm": {
+      "optional": false
+    }
+  }
+}

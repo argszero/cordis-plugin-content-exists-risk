@@ -1,0 +1,26 @@
+# The @argszero/cordis-plugin-content-exists-risk bundle patch.
+#
+# It needs no deployment-specific config to mount. With no config the plugin
+# watches the `llm/stream` waterfall and does nothing at all until a provider
+# refuses a request with the content-moderation rejection -- then it retries with
+# the request's newest messages spaced character-by-character, escalating the
+# scope rung by rung until the provider accepts or the ladder is exhausted.
+#
+# Tune via a profile layer if desired:
+#
+#   - set:
+#       - id: content-exists-risk
+#         config:
+#           mode: auto                # auto (default) | always | observe | off
+#           ladder: [4, 32, 0]        # newest N messages per rung; 0 = every message, last rung only
+#           roles: [user]             # `user` covers tool results; add `assistant` only when the poison sits there
+#           includeAuxiliary: false   # compaction/session-title calls keep their output in the session
+#           maxChars: 200000          # characters added per request before a pass stops
+#           matchPattern: 'content[_ ]?exists[_ ]?risk'
+#           matchCodes: []            # e.g. [INVALID_REQUEST] for a gateway that mangles the message
+#           statuses: [400]
+#           warnLimit: 5              # bounded diagnostics; 0 silences them
+
+- insert:
+    - id: content-exists-risk
+      name: '@argszero/cordis-plugin-content-exists-risk'
