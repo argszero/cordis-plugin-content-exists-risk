@@ -124,3 +124,23 @@ test('the shipped file list carries the manifest the harness reads', () => {
   assert.ok(manifest.files.includes('cordis.patch.yml'), 'the patch file must be in `files`')
   assert.ok(existsSync(join(ROOT, 'cordis.patch.yml')), 'and must exist')
 })
+
+test('the entry point ships with the repository, not only with a local build', () => {
+  // A consumer installs this package from the repository, and a git install
+  // carries only tracked files. Building `lib/` locally proves nothing about the
+  // artifact: if `lib/` is ignored, every `dsh plugin add` of this repository
+  // attaches a package whose `main` does not exist, and the profile mounts
+  // nothing while reporting success. That is silent, so it is asserted here.
+  assert.ok(manifest.files.includes('lib/index.js'), 'the built entry must be in `files`')
+  assert.ok(existsSync(join(ROOT, 'lib/index.js')), 'and must exist (run the build)')
+
+  const ignore = readFileSync(join(ROOT, '.gitignore'), 'utf8')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !line.startsWith('#'))
+  assert.deepEqual(
+    ignore.filter((pattern) => pattern === 'lib/' || pattern === 'lib' || pattern === '/lib/'),
+    [],
+    'lib/ must not be ignored: a git install would ship no entry point',
+  )
+})

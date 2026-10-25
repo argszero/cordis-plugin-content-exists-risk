@@ -13,7 +13,7 @@
 #         config:
 #           mode: auto                # auto (default) | always | observe | off
 #           ladder: [4, 32, 0]        # newest N messages per rung; 0 = every message, last rung only
-#           roles: [user]             # `user` covers tool results; add `assistant` only when the poison sits there
+#           roles: [user, tool]       # user input + tool results; add `assistant` only when the poison sits there
 #           includeAuxiliary: false   # compaction/session-title calls keep their output in the session
 #           maxChars: 200000          # characters added per request before a pass stops
 #           matchPattern: 'content[_ ]?exists[_ ]?risk'

@@ -76,11 +76,15 @@
  *
  * ## Boundaries (what this plugin does not fix)
  *
- * - **Assistant and system content is opt-in.** `roles` defaults to `['user']`
- *   (which carries tool results, the shape most reported poisons arrive in).
- *   Model output is not where fetched content enters, spacing it costs the most
- *   tokens, and it invites the model to imitate spaced-out text. Add
- *   `'assistant'` only when the poison is known to sit there.
+ * - **Assistant and system content is opt-in.** `roles` defaults to
+ *   `['user', 'tool']` — user input and tool results, the two places fetched
+ *   content enters, and the shape most reported poisons arrive in. Tool results
+ *   were user-role content through the 0.1.x lines and are first-class
+ *   `role: 'tool'` messages from the 0.2.1 line on; the default names both so
+ *   one mount covers either line. Model output is not where fetched content
+ *   enters, spacing it costs the most tokens, and it invites the model to
+ *   imitate spaced-out text. Add `'assistant'` only when the poison is known to
+ *   sit there.
  * - **`tool-call` arguments are never rewritten.** `arguments` is a raw JSON
  *   string; a character-level transform would corrupt the call's syntax, and a
  *   JSON-aware one is a different feature with different hazards.
@@ -109,15 +113,19 @@
 
 import z from '@deepseek-ai/schemastery'
 import type { Context } from '@deepseek-ai/cordis'
-import type { ContentBlock, GenerateOptions, LlmFailure, Message, StreamChunk } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, GenerateOptions, LlmFailure, StreamChunk } from '@deepseek-ai/dsh-llm'
 
 /** How the plugin behaves when it sees a request. */
 export type Mode = 'off' | 'observe' | 'auto' | 'always'
 
 /** Message roles whose content this plugin may rewrite. */
-export type ScopedRole = 'system' | 'user' | 'assistant'
+export type ScopedRole = 'system' | 'user' | 'assistant' | 'tool'
 
-/** Deepest `tool-result` nesting traversed before a container is left alone. */
+/**
+ * Deepest container nesting traversed before a container is left alone — a
+ * guard against a malformed payload that contains itself, not a limit any real
+ * request reaches.
+ */
 const MAX_DEPTH = 8
 
 /** Bound on remembered session rungs; the entry used least recently is evicted. */
@@ -148,7 +156,11 @@ export interface Config {
    * A rung is tried only when the previous one was rejected. Default `[4, 32, 0]`.
    */
   ladder?: number[]
-  /** Roles whose content may be rewritten. Default `['user']` (carries tool results). */
+  /**
+   * Roles whose content may be rewritten. Default `['user', 'tool']`: user input
+   * and tool results are the two places fetched content enters, and they are two
+   * distinct message roles from the line that made tool results first-class.
+   */
   roles?: ScopedRole[]
   /** Whether `purpose`-carrying auxiliary calls are rewritten too. Default `false`. */
   includeAuxiliary?: boolean
@@ -200,7 +212,7 @@ export const inject = ['llm']
 export const Config: z<Config> = z.object({
   mode: z.union(['off', 'observe', 'auto', 'always']).default('auto'),
   ladder: z.array(z.number()).default([4, 32, 0]),
-  roles: z.array(z.union(['system', 'user', 'assistant'])).default(['user']),
+  roles: z.array(z.union(['system', 'user', 'assistant', 'tool'])).default(['user', 'tool']),
   includeAuxiliary: z.boolean().default(false),
   maxChars: z.number().default(200000),
   matchPattern: z.string().default('content[_ ]?exists[_ ]?risk'),
@@ -264,7 +276,7 @@ export function resolveConfig(config: Config = {}): ResolvedConfig {
   return {
     mode,
     ladder: validateLadder(config.ladder ?? [4, 32, 0]),
-    roles: config.roles ?? ['user'],
+    roles: config.roles ?? ['user', 'tool'],
     includeAuxiliary: config.includeAuxiliary ?? false,
     maxChars,
     matchPattern,
@@ -318,10 +330,24 @@ export function spaceOut(text: string): string {
   return out
 }
 
+/**
+ * The part of a request message this walk reads and rebuilds.
+ *
+ * Named here rather than imported because the published element type of
+ * `GenerateOptions.messages` differs across the lines this package supports:
+ * `Message` through the 0.1.x lines, and `Message | RequestUserInput` from the
+ * line that made tool results first-class. Both are structurally this, and one
+ * source has to compile against every line the package claims.
+ */
+export interface WalkableMessage {
+  readonly role: string
+  readonly content: readonly ContentBlock[]
+}
+
 /** What one rewrite pass did. */
-export interface RewriteOutcome {
+export interface RewriteOutcome<M extends WalkableMessage = WalkableMessage> {
   /** The rewritten message list; untouched messages keep their identity. */
-  readonly messages: Message[]
+  readonly messages: M[]
   /** Messages actually rebuilt — the ladder's unit of progress. */
   readonly messagesRewritten: number
   /** Blocks whose text changed. */
@@ -358,24 +384,54 @@ function textOf(block: ContentBlock): string | undefined {
 }
 
 /**
+ * Read the nested block list of a container block, if it carries one.
+ *
+ * This is the same rule {@link textOf} applies, one level up: what a block
+ * *contains* is a structural property, so it is read structurally rather than
+ * against a list of tags. A tag list is the one thing this walk cannot have —
+ * the vocabulary is merge-extensible, and a plugin's own container block reaches
+ * the request with content this transform would otherwise never see.
+ *
+ * The historical spelling of that container was the `tool-result` wrapper block,
+ * whose `content` array held a whole result's blocks inside a user-role message.
+ * Tool results became first-class `role: 'tool'` messages (`createToolResultMessage`)
+ * and a `tool-result` block in interpreted content is now a hard admission
+ * refusal, so on the current line the wrapper no longer occurs — but the walk
+ * stays structural, because the property it tests was never about that tag: on
+ * the older prerelease lines the wrapper is still the shape fetched content
+ * arrives in, and on every line a nested container keeps working.
+ *
+ * @param block - one content block.
+ * @returns the nested blocks, or `undefined` when the block is a leaf.
+ */
+function nestedBlocksOf(block: ContentBlock): readonly ContentBlock[] | undefined {
+  const candidate = (block as { content?: unknown }).content
+  return Array.isArray(candidate) ? (candidate as readonly ContentBlock[]) : undefined
+}
+
+/**
  * Rewrite one block list.
  * @param blocks - the blocks to walk.
  * @param state - character accounting for the current pass.
- * @param depth - current `tool-result` nesting depth.
+ * @param depth - current container nesting depth.
  * @returns rebuilt blocks, or `undefined` when nothing changed.
  */
 function rewriteBlocks(blocks: readonly ContentBlock[], state: PassState, depth: number): ContentBlock[] | undefined {
   let changed = false
   const next: ContentBlock[] = []
   for (const block of blocks) {
-    if (block.type === 'tool-result' && depth < MAX_DEPTH) {
-      const nested = rewriteBlocks(block.content, state, depth + 1)
-      if (nested === undefined) {
+    const nested = depth < MAX_DEPTH ? nestedBlocksOf(block) : undefined
+    if (nested !== undefined) {
+      const rewritten = rewriteBlocks(nested, state, depth + 1)
+      if (rewritten === undefined) {
         next.push(block)
         continue
       }
       changed = true
-      next.push({ ...block, content: nested })
+      // The block was proven to carry nested blocks by \`nestedBlocksOf\`; the
+      // container view states that runtime fact once, where it is rebuilt.
+      const container: ContentBlock & { content: readonly ContentBlock[] } = { ...block, content: rewritten }
+      next.push(container)
       continue
     }
     const text = textOf(block)
@@ -409,13 +465,17 @@ function rewriteBlocks(blocks: readonly ContentBlock[], state: PassState, depth:
  * @param newest - how many of the newest eligible messages to rewrite; `0` means every message.
  * @returns the outcome, or `undefined` when this transform can change nothing.
  */
-export function rewriteMessages(
-  messages: readonly Message[],
+export function rewriteMessages<M extends WalkableMessage>(
+  messages: readonly M[],
   config: ResolvedConfig,
   newest: number,
-): RewriteOutcome | undefined {
+): RewriteOutcome<M> | undefined {
   const state: PassState = { maxChars: config.maxChars, blocks: 0, chars: 0, exhausted: false }
-  const next = [...messages]
+  // The operator's vocabulary is deliberately smaller than the message role
+  // union (a plugin may add a role this transform has no business rewriting), so
+  // membership is tested as a plain string lookup.
+  const scoped: readonly string[] = config.roles
+  const next: M[] = [...messages]
   let rewritten = 0
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (newest !== 0 && rewritten >= newest) break
@@ -425,10 +485,10 @@ export function rewriteMessages(
     }
     const message = messages[index]
     if (message === undefined) continue
-    if (!config.roles.includes(message.role)) continue
+    if (!scoped.includes(message.role)) continue
     const content = rewriteBlocks(message.content, state, 0)
     if (content === undefined) continue
-    next[index] = { ...message, content }
+    next[index] = { ...message, content } as M
     rewritten += 1
   }
   if (rewritten === 0) return undefined
@@ -515,11 +575,14 @@ export function apply(ctx: Context, config: Config = {}): void {
     }
   }
 
+  /** The message element type this request actually carries, on any line. */
+  type RequestMsg = GenerateOptions['messages'][number]
+
   /** One rung of a request's plan, with the ladder index it came from. */
   interface Rung {
     readonly newest: number
     readonly rung: number
-    readonly outcome: RewriteOutcome
+    readonly outcome: RewriteOutcome<RequestMsg>
   }
 
   /** How one dispatch ended. */

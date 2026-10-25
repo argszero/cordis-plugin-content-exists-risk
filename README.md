@@ -49,8 +49,16 @@ already known to work.
 ## Install
 
 ```sh
+# from the npm registry, once published there
 npm install @argszero/cordis-plugin-content-exists-risk
+
+# from this repository (only this verb attaches a plugin to a profile)
+dsh plugin --profile <profile> add github:argszero/cordis-plugin-content-exists-risk
 ```
+
+`npm install` puts the package in a tree; it does not register the bundle, so a
+`dsh` profile never mounts it that way. `dsh plugin add` writes the entry into
+`dsh.profile.bundles`.
 
 Then mount it, by adding to your profile's config:
 
@@ -69,7 +77,7 @@ profile picks it up without any further wiring. Mounting needs no configuration.
 |---|---|---|
 | `mode` | `auto` | `auto` probes untouched and rewrites only after a rejection; `always` rewrites from the first dispatch; `observe` reports what it *would* rewrite and dispatches unchanged; `off` leaves every request alone. |
 | `ladder` | `[4, 32, 0]` | Rungs, in newest-message counts. `0` means every message and may only be the last rung. Must escalate. |
-| `roles` | `['user']` | Roles whose content may be rewritten. `user` also carries tool results, which is where fetched content lands. |
+| `roles` | `['user', 'tool']` | Roles whose content may be rewritten. User input and tool results are the two places fetched content lands, and they are two message roles from the 0.2.1 line on (before it, a tool result arrived as user-role content). Naming roles explicitly replaces the default, so `roles: [user]` narrows the mount back to user input alone. |
 | `includeAuxiliary` | `false` | Whether `purpose`-carrying calls (compaction, session title) are rewritten. Their output is folded back into the session, so a spaced request yields a spaced summary. |
 | `maxChars` | `200000` | Characters added per request before a pass stops. `0` disables the budget. |
 | `matchPattern` | `content[_ ]?exists[_ ]?risk` | Regex (case-insensitive) matched against the provider's failure message. |
@@ -123,7 +131,7 @@ knowingly, and with a log line.
 
 ## Verification
 
-`npm test` builds and runs 47 tests against a real `@deepseek-ai/cordis` context
+`npm test` builds and runs 48 tests against a real `@deepseek-ai/cordis` context
 and a real `@deepseek-ai/dsh-llm` runtime, with a stub provider that refuses a
 request exactly the way moderation does (a terminal `error` finish, no content):
 
@@ -143,6 +151,29 @@ Nine mutations of the implementation were run against this suite (transform
 disabled, hold-back guard removed, attachment protection removed, rung
 off-by-one, latch not written, latch not read, rejection gate removed, an
 undeclared import, a stale dependency) — each one turned the suite red.
+
+## Supported lines
+
+Each line below was measured separately: its own `npm install`, a build with
+`tsc`, then the full suite, with the resolved `@deepseek-ai/dsh-llm` version
+checked first. The suite is identical on all of them — 48 tests, 48 passing —
+because the walk reads block content structurally rather than against a tag list,
+and the default role scope names both spellings of a tool result.
+
+| line | resolved version measured |
+|---|---|
+| 0.1.2 prerelease | `0.1.2-rc.1` |
+| 0.1.3 prerelease | `0.1.3-alpha.2` |
+| 0.1.5 prerelease | `0.1.5-alpha.1` |
+| 0.1.6 prerelease | `0.1.6-alpha.1` |
+| 0.2.1 prerelease | `0.2.1-rc.1`, `0.2.1-rc.2`, `0.2.1-rc.3` |
+
+From `0.2.1-rc.1` on, tool results are first-class `role: 'tool'` messages and a
+`tool-result` content block in interpreted content is a hard admission refusal;
+before that they were a `tool-result` container inside a user-role message. Both
+shapes are in default scope, so one mount covers either line. What does **not**
+change: an assistant or system message is still opt-in, and tool-call arguments,
+tool schemas and `options.system` are still never rewritten.
 
 ## Source
 

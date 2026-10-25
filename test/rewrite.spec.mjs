@@ -54,6 +54,22 @@ test('roles scope the rewrite, and user is the default', () => {
   assert.equal(widened.messages[0].content[0].text, 's p o k e n')
 })
 
+test('tool results are rewritten under the default scope, whether they arrive as a message or a container', () => {
+  // From the line that made tool results first-class they are `role: 'tool'`
+  // messages; before it they were a `tool-result` container inside a user
+  // message. The default scope has to reach the first shape as it always reached
+  // the second, because this is the shape most reported poisons arrive in.
+  const firstClass = message('tool', [{ type: 'text', text: 'page body' }], 'tool-1')
+  const toolOutcome = rewriteMessages([firstClass], resolveConfig(), 0)
+  assert.equal(toolOutcome?.messagesRewritten, 1, 'a tool-role message is in default scope')
+  assert.equal(toolOutcome.messages[0].content[0].text, 'p a g e b o d y')
+
+  // And a tool result is not opt-out by accident: naming roles explicitly still
+  // controls it, so an operator narrowing the scope keeps the narrowing.
+  const narrowed = rewriteMessages([firstClass], resolveConfig({ roles: ['user'] }), 0)
+  assert.equal(narrowed, undefined, 'an explicit user-only scope leaves tool messages alone')
+})
+
 test('nested tool-result content is rewritten, because that is where fetched content lands', () => {
   const messages = [message('user', [{
     type: 'tool-result',
@@ -136,7 +152,7 @@ test('resolveConfig materializes the documented defaults', () => {
   const resolved = resolveConfig()
   assert.equal(resolved.mode, 'auto')
   assert.deepEqual(resolved.ladder, [4, 32, 0])
-  assert.deepEqual(resolved.roles, ['user'])
+  assert.deepEqual(resolved.roles, ['user', 'tool'], 'user input and tool results are both in default scope')
   assert.equal(resolved.includeAuxiliary, false)
   assert.equal(resolved.maxChars, 200000)
   assert.deepEqual(resolved.statuses, [400])
