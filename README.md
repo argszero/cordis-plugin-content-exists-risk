@@ -156,7 +156,7 @@ undeclared import, a stale dependency) — each one turned the suite red.
 
 Each line below was measured separately: its own `npm install`, a build with
 `tsc`, then the full suite, with the resolved `@deepseek-ai/dsh-llm` version
-checked first. The suite is identical on all of them — 48 tests, 48 passing —
+checked first. The suite is identical on all of them — 49 tests, 49 passing —
 because the walk reads block content structurally rather than against a tag list,
 and the default role scope names both spellings of a tool result.
 

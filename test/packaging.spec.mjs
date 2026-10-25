@@ -126,21 +126,32 @@ test('the shipped file list carries the manifest the harness reads', () => {
 })
 
 test('the entry point ships with the repository, not only with a local build', () => {
-  // A consumer installs this package from the repository, and a git install
-  // carries only tracked files. Building `lib/` locally proves nothing about the
-  // artifact: if `lib/` is ignored, every `dsh plugin add` of this repository
+  // A consumer installs this package from the repository or from the tarball, and
+  // neither channel carries `lib/` by itself. Building `lib/` locally proves
+  // nothing about the artifact: if an ignore file hides it, a `dsh plugin add`
   // attaches a package whose `main` does not exist, and the profile mounts
   // nothing while reporting success. That is silent, so it is asserted here.
   assert.ok(manifest.files.includes('lib/index.js'), 'the built entry must be in `files`')
   assert.ok(existsSync(join(ROOT, 'lib/index.js')), 'and must exist (run the build)')
 
-  const ignore = readFileSync(join(ROOT, '.gitignore'), 'utf8')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '' && !line.startsWith('#'))
+  // Both channels have an ignore file that outranks `files` for what they carry:
+  // `.gitignore` decides a git install, `.npmignore` a published tarball. A
+  // measured copy of this tree holds neither, and a file that is not there
+  // cannot hide anything — so an absent one is skipped rather than required,
+  // which is what lets this suite run against a line pinned outside a checkout.
+  const rules = ['.gitignore', '.npmignore']
+    .filter((name) => existsSync(join(ROOT, name)))
+    .flatMap((name) =>
+      readFileSync(join(ROOT, name), 'utf8')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line !== '' && !line.startsWith('#'))
+        .map((line) => `${name}: ${line}`),
+    )
+  const hidingLibrary = rules.filter((rule) => /^\.\w*ignore: \/?lib(\/|$)/.test(rule))
   assert.deepEqual(
-    ignore.filter((pattern) => pattern === 'lib/' || pattern === 'lib' || pattern === '/lib/'),
+    hidingLibrary,
     [],
-    'lib/ must not be ignored: a git install would ship no entry point',
+    `no ignore file may hide lib/: ${hidingLibrary.join(', ')} — that channel would ship no entry point`,
   )
 })
